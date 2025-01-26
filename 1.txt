@@ -1,0 +1,66 @@
+import unittest
+from types import SimpleNamespace
+from unittest.mock import patch, MagicMock
+from pyspark.sql import SparkSession
+from your_module import run  # Replace `your_module` with the actual module name
+
+
+class TestRunFunction(unittest.TestCase):
+    @patch("etl_job.utils.write_utils.df_to_hive")  # Mock df_to_hive to skip writing data
+    @patch("etl_job.utils.write_utils.partition_exists")  # Mock partition_exists
+    @patch("etl_job.spark.builder.build_spark")  # Mock build_spark to avoid actual Spark session creation
+    @patch("your_module.jairam.migcolumns")  # Mock migcolumns
+    @patch("your_module.jairam.new_mapping")  # Mock new_mapping
+    def test_run(self, mock_new_mapping, mock_migcolumns, mock_build_spark, mock_partition_exists, mock_df_to_hive):
+        """Test run function focusing on env, start_date, partition_exists and Spark session creation."""
+
+        # Mock Spark session
+        mock_spark = MagicMock(spec=SparkSession)
+        mock_build_spark.return_value = mock_spark
+
+        # Mock the return values for partition_exists (simulate no partition exists first, then partition exists)
+        mock_partition_exists.side_effect = [False, True]
+
+        # Mock migcolumns and new_mapping to return dummy data
+        mock_migcolumns.return_value = MagicMock()
+        mock_new_mapping.return_value = MagicMock()
+
+        # Mock df_to_hive to do nothing
+        mock_df_to_hive.return_value = None
+
+        # Test valid environments (prod, stg)
+        for env in ["prod", "stg"]:
+            with self.subTest(env=env):
+                # Mock args
+                args = SimpleNamespace(env=env, start_date="2020-01-01")
+
+                # Run the function
+                run(args=args, spark=mock_spark)
+
+                # Assert partition_exists was called as expected
+                mock_partition_exists.assert_any_call(mock_spark, "test_schema", f"smart_{env}", "2020-01-01")
+                mock_partition_exists.assert_any_call(mock_spark, "test_schema", f"another_smart_{env}", "2020-01-01")
+
+                # Check if build_spark was called when spark is None
+                mock_build_spark.assert_called_once_with("table_1", {"spark.hive.metaStoreOrc": False})
+
+                # Check if df_to_hive was called
+                mock_df_to_hive.assert_any_call(MagicMock())  # Check that df_to_hive was called with a mocked DataFrame
+
+                # Optional: Check if migcolumns and new_mapping were called
+                mock_migcolumns.assert_called()
+                mock_new_mapping.assert_called()
+
+        # Test invalid environment
+        with self.assertRaises(ValueError):
+            args = SimpleNamespace(env="invalid_env", start_date="2020-01-01")
+            run(args=args, spark=mock_spark)
+
+        # Reset mock to validate independent calls
+        mock_build_spark.reset_mock()
+        mock_partition_exists.reset_mock()
+        mock_df_to_hive.reset_mock()
+
+
+if __name__ == "__main__":
+    unittest.main()
